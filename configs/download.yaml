@@ -1,0 +1,13 @@
+model:
+  id: google/flan-t5-base
+  revision: main
+  cache_dir: cache/huggingface
+
+dataset:
+  id: GEM/web_nlg
+  revision: refs/convert/parquet
+  subset: en
+  format: parquet
+  cache_dir: cache/datasets
+  output_dir: data/raw
+  splits: ['train', 'validation', 'test']
