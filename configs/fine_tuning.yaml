@@ -1,0 +1,36 @@
+model:
+  id: Qwen/Qwen2.5-1.5B-Instruct
+  cache_dir: cache/huggingface
+  revision: main
+  torch_dtype: float16
+  require_cuda: true
+
+dataset:
+  raw_dir: data/raw
+  processed_dir: data/processed
+  splits: [train, validation, test]
+  seed: 42
+
+training:
+  output_dir: outputs/Qwen-text2kg-lora
+  learning_rate: 0.0001
+  num_train_epochs: 2
+  per_device_train_batch_size: 4
+  per_device_eval_batch_size: 4
+  gradient_accumulation_steps: 4
+  max_length: 384
+  logging_steps: 10
+  eval_strategy: epoch
+  save_strategy: epoch
+  gradient_checkpointing: true
+  seed: 42
+
+lora:
+  r: 16
+  alpha: 8
+  dropout: 0.1
+  target_modules: [q_proj, v_proj, k_proj, o_proj]
+
+generation:
+  max_new_tokens: 100
+  num_beams: 3

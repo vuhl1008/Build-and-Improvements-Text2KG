@@ -1,2 +1,9 @@
 # Build-and-Improvements-Text2KG
-chạy file scripts/download_assets để tải dataset và pretrained model tử HF.
+
+## Cài đặt và tải dữ liệu
+
+```bash
+pip install -r requirements.txt
+python scripts/download_assets.py
+```
+Chạy scripts/prepare_data.py để làm sạch dữ liệu và lưu vào processed
