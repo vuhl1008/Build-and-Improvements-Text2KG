@@ -44,7 +44,7 @@ class ResidualConnection(nn.Module):
         self.layer_norm = LayerNorm(d_model, eps=eps, freeze=freeze)
 
     def forward(self, x: Tensor, sublayer_output: Tensor) -> Tensor:
-        return x + sublayer_output
+        return self.layer_norm(x + sublayer_output)
 
 
 if __name__ == "__main__":
