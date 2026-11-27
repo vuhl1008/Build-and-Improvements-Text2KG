@@ -1,5 +1,5 @@
 model:
-  id: google/flan-t5-base
+  id: Qwen/Qwen2.5-1.5B-Instruct
   revision: main
   cache_dir: cache/huggingface
 
