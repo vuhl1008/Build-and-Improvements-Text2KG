@@ -8,7 +8,7 @@ from torch.nn import functional as F
 class MultiHeadAttention(nn.Module):
     """Batch-first multi-head self-attention for a Transformer encoder."""
 
-    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.0):
+    def __init__(self, d_model: int, num_heads: int, dropout: float = 0.0, *, freeze: bool = False):
         super().__init__()
         if d_model < 1 or num_heads < 1:
             raise ValueError("d_model and num_heads must be positive")
@@ -24,6 +24,13 @@ class MultiHeadAttention(nn.Module):
 
         self.qkv_proj = nn.Linear(d_model, 3 * d_model)
         self.out_proj = nn.Linear(d_model, d_model)
+        self.set_frozen(freeze)
+
+    def set_frozen(self, freeze: bool) -> None:
+        """Toggle gradients for the attention parameters while preserving gradients to the input."""
+        self.requires_grad_(not freeze)
+        if freeze:
+            self.zero_grad(set_to_none=True)
 
     def forward(self, x: Tensor, key_padding_mask: Tensor | None = None) -> Tensor:
         """Return (batch, seq_len, d_model). True in the (batch, seq_len) mask skips a key."""
@@ -99,4 +106,24 @@ if __name__ == "__main__":
     print("After training, embedding.weight.grad:", grad)
     print("After training, attention.qkv_proj.weight.grad:", attention.qkv_proj.weight.grad)
     print("After training, attention.out_proj.weight.grad:", attention.out_proj.weight.grad)
+
+    optimizer = torch.optim.SGD([*embedding.parameters(), *attention.parameters()], lr=0.01)
+    for freeze in (True, False):
+        attention.set_frozen(freeze)
+        if freeze:
+            assert all(p.grad is None for p in attention.parameters())
+        optimizer.zero_grad(set_to_none=True)
+        before = {name: p.detach().clone() for name, p in attention.named_parameters()}
+        output = attention(embedding(token_ids), key_padding_mask=token_ids.eq(pad_id))
+        output[0, 0].square().sum().backward()
+        assert embedding.token_embedding.embedding.weight.grad[7].abs().sum() > 0
+        assert all((p.grad is None) == freeze for p in attention.parameters())
+        optimizer.step()
+        if freeze:
+            for name, p in attention.named_parameters():
+                assert torch.equal(p, before[name])
+        else:
+            assert not torch.equal(attention.qkv_proj.weight, before["qkv_proj.weight"])
+            assert not torch.equal(attention.out_proj.weight, before["out_proj.weight"])
+        print(f"freeze={freeze}, attention gradients and optimizer update checked.")
     print("Embedding + multi-head attention test passed.")
