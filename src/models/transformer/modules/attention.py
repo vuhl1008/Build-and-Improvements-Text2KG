@@ -63,13 +63,40 @@ class MultiHeadAttention(nn.Module):
 
 ## --------- TEST --------- ##
 if __name__ == "__main__":
-    torch.manual_seed(0)
-    x = torch.rand(2, 3, 4)
-    mask = torch.tensor([
-        [False, False, True], 
-        [False, True, True]
-    ])
+    if __package__:
+        from .embeddings import TransformerEmbedding
+    else:
+        from embeddings import TransformerEmbedding
 
-    attn = MultiHeadAttention(d_model=4, num_heads=2)
-    out = attn(x, key_padding_mask=mask)
-    print(out)
+    torch.manual_seed(0)
+
+    pad_id = 0
+    token_ids = torch.tensor([
+        [4, 7, 0],
+        [2, 5, 9]
+    ])
+    embedding = TransformerEmbedding(vocab_size=10, d_model=4, padding_idx=pad_id)
+    attention = MultiHeadAttention(d_model=4, num_heads=2)
+
+    vectors = embedding(token_ids)
+    output = attention(vectors, key_padding_mask=token_ids.eq(pad_id))
+    assert output.shape == (2, 3, 4)
+
+    print("Before training, embedding.weight.grad:", embedding.token_embedding.embedding.weight.grad)
+    print("Before training, attention.out_proj.weight.grad:", attention.out_proj.weight.grad)
+
+    # Compare the real tokens with the same sequence run without padding.
+    with torch.no_grad():
+        unpadded = attention(embedding(torch.tensor([[4, 7]])))
+    torch.testing.assert_close(output[0, :2], unpadded[0])
+
+    # A loss on token 4 reaches token 7 through self-attention.
+    output[0, 0].square().sum().backward()
+    grad = embedding.token_embedding.embedding.weight.grad
+    assert grad is not None and grad[7].abs().sum().item() > 0
+    torch.testing.assert_close(grad[pad_id], torch.zeros_like(grad[pad_id]))
+
+    print("After training, embedding.weight.grad:", grad)
+    print("After training, attention.qkv_proj.weight.grad:", attention.qkv_proj.weight.grad)
+    print("After training, attention.out_proj.weight.grad:", attention.out_proj.weight.grad)
+    print("Embedding + multi-head attention test passed.")
