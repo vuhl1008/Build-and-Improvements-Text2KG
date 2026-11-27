@@ -8,10 +8,21 @@ from torch import Tensor, nn
 class TokenEmbedding(nn.Module):
     """Map token IDs to learned vectors scaled by sqrt(d_model)."""
 
-    def __init__(self, vocab_size: int, d_model: int, padding_idx: Optional[int] = None):
+    def __init__(
+        self, vocab_size: int, d_model: int, padding_idx: Optional[int] = None,
+        *, freeze: bool = False,
+    ):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, d_model, padding_idx=padding_idx)
         self.scale = math.sqrt(d_model)
+        self.set_frozen(freeze)
+
+    def set_frozen(self, freeze: bool) -> None:
+        """Toggle training and discard any pending gradient when freezing."""
+        weight = self.embedding.weight
+        weight.requires_grad_(not freeze)
+        if freeze:
+            weight.grad = None
 
     def forward(self, token_ids: Tensor) -> Tensor:
         return self.embedding(token_ids) * self.scale
@@ -44,15 +55,19 @@ class PositionalEmbedding(nn.Module):
 
 
 class TransformerEmbedding(nn.Module):
-    def __init__(self, vocab_size: int, d_model: int, padding_idx: Optional[int] = None):
+    def __init__(
+        self, vocab_size: int, d_model: int, padding_idx: Optional[int] = None,
+        *, freeze: bool = False,
+    ):
         super().__init__()
-        self.token_embedding = TokenEmbedding(vocab_size, d_model, padding_idx)
+        self.token_embedding = TokenEmbedding(vocab_size, d_model, padding_idx, freeze=freeze)
         self.positional_embedding = PositionalEmbedding(d_model)
 
     def forward(self, token_ids: Tensor) -> Tensor:
         return self.token_embedding(token_ids) + self.positional_embedding(token_ids)
 
 
+## --------- TEST --------- ##
 if __name__ == "__main__":
     torch.manual_seed(0)
     token_ids = torch.tensor([
@@ -78,4 +93,34 @@ if __name__ == "__main__":
     print("output.shape:", tuple(output.shape))
     print("token 4 + position 0:", output[0, 0].tolist())
     print("token 4 + position 1:", output[1, 1].tolist())
+
+    # A trainable output layer keeps backward valid even with a frozen embedding.
+    head = nn.Linear(4, 1, bias=False)
+    optimizer = torch.optim.SGD([*model.parameters(), *head.parameters()], lr=0.1)
+    print("Before training, head.weight.grad:", head.weight.grad)
+    weight = model.token_embedding.embedding.weight
+    print("Before training, embedding.weight.grad:", weight.grad)
+    for freeze in (False, True, False):
+        model.token_embedding.set_frozen(freeze)
+        optimizer.zero_grad(set_to_none=True)
+        before = weight.detach().clone()
+        loss = head(model(token_ids)).mean()
+        loss.backward()
+
+        assert head.weight.grad is not None
+        if freeze:
+            assert weight.grad is None
+        else:
+            assert weight.grad is not None and weight.grad[4].abs().sum() > 0
+            torch.testing.assert_close(weight.grad[0], torch.zeros_like(weight[0]))
+            print(f"freeze={freeze}, token 4 grad={weight.grad[4].tolist()}")
+
+        optimizer.step()
+        if freeze:
+            assert torch.equal(weight, before)
+        else:
+            assert not torch.equal(weight[4], before[4])
+            assert torch.equal(weight[0], before[0])
+        print(f"freeze={freeze}, token 4 updated={not torch.equal(weight[4], before[4])}")
+
     print("All embedding checks passed.")
