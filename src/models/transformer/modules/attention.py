@@ -6,7 +6,7 @@ from torch.nn import functional as F
 
 
 class MultiHeadAttention(nn.Module):
-    """Batch-first multi-head self-attention for a Transformer encoder."""
+    """Batch-first multi-head attention with optional cross-attention context."""
 
     def __init__(self, d_model: int, num_heads: int, dropout: float = 0.0, *, freeze: bool = False):
         super().__init__()
@@ -32,23 +32,43 @@ class MultiHeadAttention(nn.Module):
         if freeze:
             self.zero_grad(set_to_none=True)
 
-    def forward(self, x: Tensor, key_padding_mask: Tensor | None = None) -> Tensor:
-        """Return (batch, seq_len, d_model). True in the (batch, seq_len) mask skips a key."""
+    def forward(
+        self, x: Tensor, key_padding_mask: Tensor | None = None, *, context: Tensor | None = None
+    ) -> Tensor:
+        """Use x for queries and context (default x) for keys and values.
+
+        Return (batch, query_len, d_model). True in the (batch, key_len) mask skips a key.
+        """
         if x.ndim != 3 or x.size(-1) != self.d_model:
-            raise ValueError(f"x must have shape (batch, seq_len, {self.d_model})")
-        batch_size, seq_len, _ = x.shape
+            raise ValueError(f"x must have shape (batch, query_len, {self.d_model})")
+        batch_size, query_len, _ = x.shape
+        
+        if context is not None and (
+            context.ndim != 3 or context.size(0) != batch_size or context.size(-1) != self.d_model
+        ):
+            raise ValueError(f"context must have shape ({batch_size}, key_len, {self.d_model})")
+        key_len = query_len if context is None else context.size(1)
 
         if key_padding_mask is not None:
-            if key_padding_mask.dtype != torch.bool or key_padding_mask.shape != x.shape[:2]:
-                raise ValueError("key_padding_mask must be a boolean tensor of shape (batch, seq_len)")
+            if key_padding_mask.dtype != torch.bool or key_padding_mask.shape != (batch_size, key_len):
+                raise ValueError("key_padding_mask must be a boolean tensor of shape (batch, key_len)")
 
-        qkv = self.qkv_proj(x) # (batch, seq_len, 3 * d_model)
-        qkv = qkv.reshape(batch_size, seq_len, 3, self.num_heads, self.head_dim)
-        query, key, value = qkv.permute(2, 0, 3, 1, 4).unbind(0) # (QKV, batch, head, token, dim)
-        
+        if context is None:
+            query, key, value = self.qkv_proj(x).chunk(3, dim=-1)
+        else:
+            # The packed projection stores Q first, followed by K and V.
+            weight, bias = self.qkv_proj.weight, self.qkv_proj.bias
+            query = F.linear(x, weight[:self.d_model], bias[:self.d_model])
+            key_value = F.linear(context, weight[self.d_model:], bias[self.d_model:])
+            key, value = key_value.chunk(2, dim=-1)
+
+        query = query.reshape(batch_size, query_len, self.num_heads, self.head_dim).transpose(1, 2)
+        key = key.reshape(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+        value = value.reshape(batch_size, key_len, self.num_heads, self.head_dim).transpose(1, 2)
+
         compute_dtype = torch.promote_types(query.dtype, torch.float32)
         with torch.autocast(device_type=x.device.type, enabled=False):
-            # (batch, head, token, dim) @ (batch, head, dim, token) -> (batch, head, token, token)
+            # Each head computes a (query_len, key_len) matrix of scores.
             scores = query.to(compute_dtype) @ key.to(compute_dtype).transpose(-2, -1)
             scores = scores / math.sqrt(self.head_dim)
 
@@ -63,7 +83,7 @@ class MultiHeadAttention(nn.Module):
             weights = F.dropout(weights, p=self.dropout, training=self.training)
             heads = (weights @ value.to(compute_dtype)).to(value.dtype)
 
-        merged = heads.transpose(1, 2).reshape(batch_size, seq_len, self.d_model)
+        merged = heads.transpose(1, 2).reshape(batch_size, query_len, self.d_model)
         return self.out_proj(merged)
 
 
@@ -88,6 +108,19 @@ if __name__ == "__main__":
     vectors = embedding(token_ids)
     output = attention(vectors, key_padding_mask=token_ids.eq(pad_id))
     assert output.shape == (2, 3, 4)
+
+    # Compare three queries over five context tokens with PyTorch's attention.
+    context = torch.randn(2, 5, 4)
+    context_mask = torch.tensor([[False, False, False, True, True], [True, False, False, False, False]])
+    reference = nn.MultiheadAttention(4, 2, batch_first=True)
+    with torch.no_grad():
+        reference.in_proj_weight.copy_(attention.qkv_proj.weight)
+        reference.in_proj_bias.copy_(attention.qkv_proj.bias)
+        reference.out_proj.load_state_dict(attention.out_proj.state_dict())
+        expected, _ = reference(vectors, context, context, key_padding_mask=context_mask)
+        actual = attention(vectors, context=context, key_padding_mask=context_mask)
+    assert actual.shape == (2, 3, 4)
+    torch.testing.assert_close(actual, expected)
 
     print("Before training, embedding.weight.grad:", embedding.token_embedding.embedding.weight.grad)
     print("Before training, attention.out_proj.weight.grad:", attention.out_proj.weight.grad)
