@@ -37,6 +37,18 @@ class FeedForward(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self.linear2(self.dropout(self.activation(self.linear1(x))))
 
+class ProjectionLayer(nn.Module):
+    """Map each decoder hidden state to logits over the target vocabulary."""
+
+    def __init__(self, d_model: int, vocab_size: int, *, freeze: bool = False) -> None:
+        super().__init__()
+        self.proj = nn.Linear(d_model, vocab_size)
+        self.requires_grad_(not freeze)
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.proj(x)
+
+
 class ResidualConnection(nn.Module):
     """Residual connection with optional layer normalization."""
     def __init__(self, d_model: int, eps: float = 1e-5, *, freeze: bool = False):

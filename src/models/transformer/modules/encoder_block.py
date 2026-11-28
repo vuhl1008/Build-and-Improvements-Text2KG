@@ -1,9 +1,12 @@
 import torch
 import torch.nn as nn
-from torch import Tensor
-from attention import MultiHeadAttention
-from layers import FeedForward, LayerNorm, ResidualConnection
-from embeddings import TransformerEmbedding
+
+if __package__:
+    from .attention import MultiHeadAttention
+    from .layers import FeedForward, ResidualConnection
+else:
+    from attention import MultiHeadAttention
+    from layers import FeedForward, ResidualConnection
 
 class EncoderBlock(nn.Module):
     """A single encoder block for a Transformer model."""
