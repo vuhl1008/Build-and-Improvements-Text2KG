@@ -1,4 +1,4 @@
-from src.models.pretrained.config import SYSTEM_PROMPT
+from src.models.pretrained.prompt import SYSTEM_PROMPT
 
 
 def format_for_sft(dataset):

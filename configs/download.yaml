@@ -10,4 +10,5 @@ dataset:
   format: parquet
   cache_dir: cache/datasets
   output_dir: data/raw
+  process_dir: data/processed
   splits: ['train', 'validation', 'test']

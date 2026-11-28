@@ -14,14 +14,13 @@ def train(config):
     model_path = download_model(config["model"])
     tokenizer, model = load_base_model(model_path, config["model"].get("torch_dtype", "float16"))
 
+    #Data
     dataset = load_raw_splits(config["dataset"]["processed_dir"]) 
     sft_dataset = {split: format_for_sft(rows) for split, rows in dataset.items()}
     train_data = sft_dataset[config["dataset"]["splits"][0]]
     validation_data = sft_dataset[config["dataset"]["splits"][1]]
 
-    seed = config["dataset"].get("seed", 42)
-
-   
+    #Training Args
     training_args = SFTConfig(
         output_dir=config["training"]["output_dir"],
         learning_rate=config["training"]["learning_rate"],
@@ -39,6 +38,8 @@ def train(config):
         gradient_checkpointing=config["training"]["gradient_checkpointing"],
         seed=config["training"]["seed"],
     )
+
+    #Trainer
     trainer = SFTTrainer(
         model=model,
         args=training_args,
@@ -47,6 +48,7 @@ def train(config):
         peft_config=build_lora_config(config["lora"]),
         processing_class=tokenizer,
     )
+    
     trainer.train()
     trainer.save_model(config["training"]["output_dir"])
     tokenizer.save_pretrained(config["training"]["output_dir"])
