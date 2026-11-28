@@ -1,5 +1,6 @@
 datasets
 transformers
+tokenizers
 huggingface-hub
 accelerate
 peft
