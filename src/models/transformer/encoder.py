@@ -1,6 +1,6 @@
 from torch import Tensor, nn
 
-from .modules.encoder_block import EncoderBlock
+from modules.encoder_block import EncoderBlock
 
 
 class Encoder(nn.Module):
